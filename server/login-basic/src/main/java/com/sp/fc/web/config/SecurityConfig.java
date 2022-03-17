@@ -1,7 +1,11 @@
 package com.sp.fc.web.config;
 
 import org.springframework.boot.autoconfigure.security.servlet.PathRequest;
+import org.springframework.context.annotation.Bean;
+import org.springframework.security.access.hierarchicalroles.RoleHierarchy;
+import org.springframework.security.access.hierarchicalroles.RoleHierarchyImpl;
 import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
+import org.springframework.security.config.annotation.method.configuration.EnableGlobalMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.builders.WebSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -9,8 +13,14 @@ import org.springframework.security.config.annotation.web.configuration.WebSecur
 import org.springframework.security.core.userdetails.User;
 
 @EnableWebSecurity(debug = true)
+@EnableGlobalMethodSecurity(prePostEnabled = true)
 public class SecurityConfig extends WebSecurityConfigurerAdapter {
 
+    private final CustomAuthDetails customAuthDetails;
+
+    public SecurityConfig(CustomAuthDetails customAuthDetails) {
+        this.customAuthDetails = customAuthDetails;
+    }
 
     @Override
     protected void configure(AuthenticationManagerBuilder auth) throws Exception {
@@ -30,6 +40,14 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
                 );
     }
 
+    //관리자의 권한에 유저의 권한도 부여, 유저페이지도 들어갈 수 있게
+    @Bean
+    RoleHierarchy roleHierarchy(){
+        RoleHierarchyImpl roleHierarchy = new RoleHierarchyImpl();
+        roleHierarchy.setHierarchy("ROLE_ADMIN > ROLE_USER");
+        return roleHierarchy;
+    }
+
     @Override
     protected void configure(HttpSecurity http) throws Exception {
         http
@@ -43,7 +61,11 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
                         login-> login.loginPage("/login")
                                 .permitAll()
                                 .defaultSuccessUrl("/",false)
+                                .failureUrl("/login-error")
+                                .authenticationDetailsSource(customAuthDetails)
                 )
+                .logout(logout->logout.logoutSuccessUrl("/"))
+                .exceptionHandling(exception->exception.accessDeniedPage("/access-denied"))
                 ;
     }
 
