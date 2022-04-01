@@ -6,12 +6,18 @@ import org.springframework.boot.web.servlet.ServletListenerRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.security.access.hierarchicalroles.RoleHierarchy;
 import org.springframework.security.access.hierarchicalroles.RoleHierarchyImpl;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
 import org.springframework.security.config.annotation.method.configuration.EnableGlobalMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.builders.WebSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.session.SessionRegistry;
+import org.springframework.security.core.session.SessionRegistryImpl;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.NoOpPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.authentication.rememberme.JdbcTokenRepositoryImpl;
@@ -19,6 +25,7 @@ import org.springframework.security.web.authentication.rememberme.PersistentToke
 import org.springframework.security.web.authentication.rememberme.PersistentTokenRepository;
 import org.springframework.security.web.session.HttpSessionEventPublisher;
 
+import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpSessionEvent;
 import javax.sql.DataSource;
 import java.time.LocalDateTime;
@@ -88,12 +95,25 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
     }
 
     @Bean
+    SessionRegistry sessionRegistry(){
+        SessionRegistryImpl registry = new SessionRegistryImpl();
+        return registry;
+    }
+
+    @Bean
     PersistentTokenBasedRememberMeServices rememberMeServices(){
         PersistentTokenBasedRememberMeServices service =
                 new PersistentTokenBasedRememberMeServices("hello",
                         spUserService,
                         tokenRepository()
-                        );
+                        ){
+                    @Override
+                    protected Authentication createSuccessfulAuthentication(HttpServletRequest request, UserDetails user) {
+                        return new UsernamePasswordAuthenticationToken(user.getUsername(), user.getPassword(),null);
+//                        return super.createSuccessfulAuthentication(request, user);
+                    }
+                };
+        service.setAlwaysRemember(true);
         return service;
     }
 
@@ -101,7 +121,9 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
     protected void configure(HttpSecurity http) throws Exception {
         http
                 .authorizeRequests(request->
-                    request.antMatchers("/").permitAll()
+                    request
+                            .antMatchers("/").permitAll()
+                            .antMatchers("/admin/**").hasRole("ADMIN")
                             .anyRequest().authenticated()
                 )
                 .formLogin(login->
@@ -114,10 +136,21 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
                 .logout(logout->
                         logout.logoutSuccessUrl("/"))
                 .exceptionHandling(error->
-                        error.accessDeniedPage("/access-denied")
+                        error
+//                                .accessDeniedPage("/access-denied")
+                                .accessDeniedHandler(new CustomDeniedHandler())
+                                .authenticationEntryPoint(new CustomEntryPoint())
+
                 )
                 .rememberMe(r->r
                         .rememberMeServices(rememberMeServices())
+                )
+                .sessionManagement(
+                        s->s
+                                .sessionFixation(sessionFixationConfigurer -> sessionFixationConfigurer.changeSessionId())
+                                .maximumSessions(2)
+                                .maxSessionsPreventsLogin(false)
+                                .expiredUrl("/session-expired")
                 )
                 ;
     }
@@ -125,6 +158,7 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
     @Override
     public void configure(WebSecurity web) throws Exception {
         web.ignoring()
+                .antMatchers("/sessions", "/session/expire", "/session-expired")
                 .requestMatchers(
                         PathRequest.toStaticResources().atCommonLocations(),
                         PathRequest.toH2Console()
